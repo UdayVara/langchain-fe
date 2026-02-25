@@ -1,56 +1,55 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 
 export default function Home() {
   const [messages, setMessages] = useState([
     { id: 1, type: "assistant", text: "Hello! How can I help you today?" },
   ]);
   const [input, setInput] = useState("");
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const [loading, setLoading] = useState(false);
+const handleSend = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!input.trim() || loading) return;
 
-  const handleSend = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim()) return;
+  const userMessage = { id: Date.now(), type: "user", text: input };
+  const assistantId = Date.now() + 1;
 
-    const userMessage = { id: Date.now(), type: "user", text: input };
-    setMessages((prev) => [...prev, userMessage]);
+  setMessages((prev) => [
+    ...prev,
+    userMessage,
+    { id: assistantId, type: "assistant", text: "" },
+  ]);
 
-    // Create empty assistant message for streaming
-    const assistantId = Date.now() + 1;
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantId, type: "assistant", text: "" },
-    ]);
+  setLoading(true);
 
-    // Close previous stream if exists
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-    }
+  try {
+    const response = await fetch("http://localhost:8000/llm-chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ prompt: input }),
+    });
 
-    const eventSource = new EventSource(
-      `http://localhost:5000/langchain/stream?prompt=${encodeURIComponent(input)}`
+    const data = await response.json();
+    const responseContent = data?.response?.content;
+
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === assistantId
+          ? { ...msg, text: responseContent }
+          : msg
+      )
     );
+  } catch (error) {
+    console.error(error);
+  } finally {
+    setLoading(false);
+  }
 
-    eventSourceRef.current = eventSource;
-
-    eventSource.onmessage = (event) => {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantId
-            ? { ...msg, text: msg.text + event.data }
-            : msg
-        )
-      );
-    };
-
-    eventSource.onerror = () => {
-      eventSource.close();
-    };
-
-    setInput("");
-  };
-
+  setInput("");
+};
   return (
     <div className="flex flex-col h-screen bg-white">
       <div className="border-b border-gray-200 px-6 py-4">
@@ -72,7 +71,14 @@ export default function Home() {
                   : "bg-gray-100 text-gray-900"
               }`}
             >
-              {msg.text}
+              {msg.text ||
+                (loading && msg.type === "assistant" ? (
+                  <span className="flex gap-1">
+                    <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></span>
+                    <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce delay-150"></span>
+                    <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce delay-300"></span>
+                  </span>
+                ) : null)}
             </div>
           </div>
         ))}
@@ -97,10 +103,14 @@ export default function Home() {
           />
           <button
             type="submit"
-            className="px-4 py-2.5 bg-gray-900 text-white rounded-lg text-sm 
-                 font-medium hover:bg-gray-800 transition-colors"
+            disabled={loading}
+            className={`px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              loading
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-gray-900 text-white hover:bg-gray-800"
+            }`}
           >
-            Send
+            {loading ? "..." : "Send"}
           </button>
         </form>
       </div>
